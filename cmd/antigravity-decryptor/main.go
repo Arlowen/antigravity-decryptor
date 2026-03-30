@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/pika/antigravity-decryptor/internal/app"
@@ -107,7 +108,16 @@ func run(args []string) error {
 
 	// list 子命令
 	if positional[0] == "list" {
-		return app.ListConversations(lsBinary, os.Stdout, verbose)
+		var w io.Writer = os.Stdout
+		if output != "" {
+			f, err := os.Create(output)
+			if err != nil {
+				return fmt.Errorf("create output file: %w", err)
+			}
+			defer f.Close()
+			w = f
+		}
+		return app.ListConversations(lsBinary, w, verbose)
 	}
 
 	// export 子命令
