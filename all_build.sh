@@ -8,7 +8,9 @@ BIN_DIR="./bin"
 TARGET_NAME="antigravity-decryptor"
 OUTPUT_PATH="${BIN_DIR}/${TARGET_NAME}"
 
-# 确保 bin 目录存在
+# 确保 bin 目录是干净的
+echo "Cleaning ${BIN_DIR}..."
+rm -rf "$BIN_DIR"
 mkdir -p "$BIN_DIR"
 
 echo "Building ${TARGET_NAME}..."
