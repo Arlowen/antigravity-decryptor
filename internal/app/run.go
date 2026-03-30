@@ -107,7 +107,7 @@ func Run(cfg RunConfig) error {
 	}
 }
 
-// ListConversations 列出所有可见的 cascade summaries（用于 list 子命令）。
+// ListConversations 列出所有可见的 cascade summaries（现在通过强制扫描物理文件获取全量）。
 func ListConversations(lsBinary string, w io.Writer, verbose bool) error {
 	if verbose {
 		fmt.Fprintf(os.Stderr, "[info] acquiring language server...\n")
@@ -119,12 +119,96 @@ func ListConversations(lsBinary string, w io.Writer, verbose bool) error {
 	defer srv.Close()
 
 	client := server.NewClient(srv.HTTPPort)
-	rawJSON, err := client.GetAllCascadeTrajectories()
+
+	// 1. 获取所有物理 .pb UUID
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("GetAllCascadeTrajectories failed: %w", err)
+		return fmt.Errorf("user home dir: %w", err)
+	}
+	dir := filepath.Join(home, ".gemini", "antigravity", "conversations")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read conversations dir: %w", err)
 	}
 
-	return export.WriteRawJSON(w, rawJSON)
+	var uuids []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".pb") {
+			uuids = append(uuids, strings.TrimSuffix(e.Name(), ".pb"))
+		}
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[info] found %d trajectories in local storage\n", len(uuids))
+	}
+
+	// 2. 构造与原生 GetAll 相同的返回值结构
+	type summaryInfo struct {
+		Summary       string   `json:"summary,omitempty"`
+		StepCount     any      `json:"stepCount,omitempty"`
+		Status        any      `json:"status,omitempty"`
+		WorkspaceUris []string `json:"workspaceUris,omitempty"`
+		CreatedTime   string   `json:"createdTime,omitempty"`
+	}
+
+	summaries := make(map[string]summaryInfo)
+
+	for _, uuid := range uuids {
+		rawJSON, err := client.GetCascadeTrajectory(uuid)
+		if err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "[warn] failed to fetch cascade %s: %v\n", uuid, err)
+			}
+			continue
+		}
+
+		nt, err := model.NormalizeResponse(rawJSON)
+		if err != nil || nt == nil {
+			continue
+		}
+
+		// 尝试生成一句 summary（类似原生的逻辑）
+		var title string
+		var firstTime string
+		for _, step := range nt.Steps {
+			if firstTime == "" && step.CreatedAt != "" {
+				firstTime = step.CreatedAt
+			}
+			if step.Type == "CORTEX_STEP_TYPE_TASK_BOUNDARY" && title == "" {
+				// NormalizedText format: "**Task**: [name]\n[summary]"
+				lines := strings.Split(step.Text, "\n")
+				title = strings.TrimPrefix(lines[0], "**Task**: ")
+			}
+		}
+		if title == "" {
+			for _, step := range nt.Steps {
+				if step.Type == "CORTEX_STEP_TYPE_USER_INPUT" && step.Text != "" {
+					title = step.Text
+					if len(title) > 60 {
+						title = title[:60] + "..."
+					}
+					break
+				}
+			}
+		}
+		if title == "" {
+			title = "Untitled Conversation"
+		}
+
+		summaries[uuid] = summaryInfo{
+			Summary:       title,
+			StepCount:     nt.NumTotalSteps,
+			Status:        nt.Status,
+			WorkspaceUris: nt.WorkspaceURIs,
+			CreatedTime:   firstTime,
+		}
+	}
+
+	result := map[string]any{
+		"trajectorySummaries": summaries,
+	}
+
+	return export.WriteNormalizedJSON(w, result)
 }
 
 // resolveCascadeID 从输入解析 cascadeId：
