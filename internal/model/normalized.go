@@ -78,7 +78,15 @@ func NormalizeResponse(rawJSON []byte) (*NormalizedTrajectory, error) {
 				}
 				ns := NormalizedStep{Index: i}
 				ns.Type = strField(step, "stepType")
+				if ns.Type == "" {
+					ns.Type = strField(step, "type")
+				}
 				ns.CreatedAt = strField(step, "createdAt")
+				if ns.CreatedAt == "" {
+					if metadata, ok := step["metadata"].(map[string]any); ok {
+						ns.CreatedAt = strField(metadata, "createdAt")
+					}
+				}
 				ns.Text = extractStepText(step)
 				result.Steps = append(result.Steps, ns)
 			}
@@ -100,8 +108,34 @@ func strField(m map[string]any, key string) string {
 
 // extractStepText 尝试从 step 中提取人类可读文本，适配多种 step 结构。
 func extractStepText(step map[string]any) string {
-	// 常见路径：step.userInput.text / step.plannerResponse.text / step.notifyUser.message
-	for _, key := range []string{"userInput", "plannerResponse", "notifyUser", "conversationHistory", "taskBoundary"} {
+	// userInput 结构
+	if input, ok := step["userInput"].(map[string]any); ok {
+		if s := strField(input, "userResponse"); s != "" {
+			return s
+		}
+		if s := strField(input, "text"); s != "" {
+			return s
+		}
+	}
+	// plannerResponse 结构
+	if planner, ok := step["plannerResponse"].(map[string]any); ok {
+		if s := strField(planner, "text"); s != "" {
+			return s
+		}
+		if s := strField(planner, "thinking"); s != "" {
+			return "*Thinking:*\n" + s
+		}
+	}
+	// taskBoundary
+	if tb, ok := step["taskBoundary"].(map[string]any); ok {
+		name := strField(tb, "taskName")
+		summary := strField(tb, "taskSummary")
+		if name != "" {
+			return fmt.Sprintf("**Task**: %s\n%s", name, summary)
+		}
+	}
+	// 常见的通用文本字段兜底
+	for _, key := range []string{"notifyUser", "conversationHistory", "ephemeralMessage"} {
 		if sub, ok := step[key].(map[string]any); ok {
 			for _, textKey := range []string{"text", "message", "content", "summary"} {
 				if s := strField(sub, textKey); s != "" {
