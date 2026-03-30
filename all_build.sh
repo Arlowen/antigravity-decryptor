@@ -22,4 +22,3 @@ go build -o "$OUTPUT_PATH" ./cmd/antigravity-decryptor/
 chmod +x "$OUTPUT_PATH"
 
 echo "Build successful! Binary location: ${OUTPUT_PATH}"
-./bin/antigravity-decryptor --version || echo "Note: --version flag not implemented, but binary is ready."
