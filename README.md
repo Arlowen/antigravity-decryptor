@@ -14,6 +14,9 @@ go build -o bin/antigravity-decryptor ./cmd/antigravity-decryptor/
 # 导出为 Markdown
 ./bin/antigravity-decryptor --format markdown <cascadeId>
 
+# 导出 Markdown，并包含内部/system steps
+./bin/antigravity-decryptor --format markdown --include-internal <cascadeId>
+
 # 列出所有对话
 ./bin/antigravity-decryptor list
 ```
@@ -26,6 +29,7 @@ go build -o bin/antigravity-decryptor ./cmd/antigravity-decryptor/
 | `<path>.pb` | 按 `.pb` 文件路径导出 |
 | `list` | 列出所有可见对话摘要 |
 | `--format` | 输出格式：`raw`（默认）/ `normalized` / `markdown` |
+| `--include-internal` | Markdown 模式下包含内部/system-only steps |
 | `--output` | 写入文件（默认 stdout） |
 | `--ls-binary` | 自定义 Language Server 路径（或设置 `ANTIGRAVITY_LS_PATH`） |
 

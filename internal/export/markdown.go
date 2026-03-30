@@ -8,9 +8,13 @@ import (
 	"github.com/pika/antigravity-decryptor/internal/model"
 )
 
+type MarkdownOptions struct {
+	IncludeInternal bool
+}
+
 // WriteMarkdownTranscript 把归一化轨迹输出为可读 markdown。
-// 只输出有实质文本内容的 step，过滤空文本。
-func WriteMarkdownTranscript(w io.Writer, t *model.NormalizedTrajectory) error {
+// 默认只输出用户可见且有实质文本内容的 step；可通过选项包含内部步骤。
+func WriteMarkdownTranscript(w io.Writer, t *model.NormalizedTrajectory, opts MarkdownOptions) error {
 	fmt.Fprintf(w, "# Conversation Transcript\n\n")
 	fmt.Fprintf(w, "- **cascadeId**: `%s`\n", t.CascadeID)
 	fmt.Fprintf(w, "- **trajectoryId**: `%s`\n", t.TrajectoryID)
@@ -22,7 +26,7 @@ func WriteMarkdownTranscript(w io.Writer, t *model.NormalizedTrajectory) error {
 	fmt.Fprintf(w, "\n---\n\n")
 
 	for _, step := range t.Steps {
-		if step.Text == "" {
+		if !includeMarkdownStep(step, opts) {
 			continue
 		}
 		role := stepRole(step.Type)
@@ -34,6 +38,27 @@ func WriteMarkdownTranscript(w io.Writer, t *model.NormalizedTrajectory) error {
 		fmt.Fprintf(w, "%s\n\n", step.Text)
 	}
 	return nil
+}
+
+func includeMarkdownStep(step model.NormalizedStep, opts MarkdownOptions) bool {
+	if step.Text == "" {
+		return false
+	}
+	if opts.IncludeInternal {
+		return true
+	}
+
+	switch step.Type {
+	case "CORTEX_STEP_TYPE_EPHEMERAL_MESSAGE",
+		"CORTEX_STEP_TYPE_CONVERSATION_HISTORY",
+		"CORTEX_STEP_TYPE_TASK_BOUNDARY",
+		"CORTEX_STEP_TYPE_KNOWLEDGE_ARTIFACTS":
+		return false
+	case "CORTEX_STEP_TYPE_PLANNER_RESPONSE":
+		return !strings.HasPrefix(step.Text, "*Thinking:*")
+	default:
+		return true
+	}
 }
 
 // stepRole 将 step type 映射到可读标签。

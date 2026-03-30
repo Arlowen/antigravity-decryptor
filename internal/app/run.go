@@ -33,6 +33,8 @@ type RunConfig struct {
 	LSBinary string
 	// Verbose 控制是否输出额外日志。
 	Verbose bool
+	// IncludeInternal 控制 markdown 是否包含内部/system-only steps。
+	IncludeInternal bool
 }
 
 // Run 是主入口：解析 cascadeId、启动/复用服务、调接口、导出。
@@ -100,7 +102,9 @@ func Run(cfg RunConfig) error {
 		if err != nil {
 			return fmt.Errorf("normalize response: %w", err)
 		}
-		return export.WriteMarkdownTranscript(w, normalized)
+		return export.WriteMarkdownTranscript(w, normalized, export.MarkdownOptions{
+			IncludeInternal: cfg.IncludeInternal,
+		})
 
 	default:
 		return fmt.Errorf("unknown format: %s (valid: raw, normalized, markdown)", cfg.Format)
@@ -181,15 +185,7 @@ func ListConversations(lsBinary string, w io.Writer, verbose bool) error {
 			}
 		}
 		if title == "" {
-			for _, step := range nt.Steps {
-				if step.Type == "CORTEX_STEP_TYPE_USER_INPUT" && step.Text != "" {
-					title = step.Text
-					if len(title) > 60 {
-						title = title[:60] + "..."
-					}
-					break
-				}
-			}
+			title = FirstUserInputTitle(nt.Steps)
 		}
 		if title == "" {
 			title = "Untitled Conversation"
@@ -209,6 +205,29 @@ func ListConversations(lsBinary string, w io.Writer, verbose bool) error {
 	}
 
 	return export.WriteNormalizedJSON(w, result)
+}
+
+// FirstUserInputTitle 返回第一个 user input step 的标题，并按 rune 安全截断。
+func FirstUserInputTitle(steps []model.NormalizedStep) string {
+	for _, step := range steps {
+		if step.Type == "CORTEX_STEP_TYPE_USER_INPUT" && step.Text != "" {
+			return truncateRunes(step.Text, 60)
+		}
+	}
+	return ""
+}
+
+func truncateRunes(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+
+	return string(runes[:limit]) + "..."
 }
 
 // resolveCascadeID 从输入解析 cascadeId：

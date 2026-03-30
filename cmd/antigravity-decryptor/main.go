@@ -21,6 +21,8 @@ Subcommands:
 Flags:
   --format    Output format: raw (default), normalized, markdown
   --output    Output file path (default: stdout)
+  --include-internal
+              Include internal/system-only steps in markdown output
   --ls-binary Path to language server binary (default: system default, or ANTIGRAVITY_LS_PATH env var)
   --verbose   Print debug logs to stderr
   --help      Show this help
@@ -38,6 +40,9 @@ Examples:
   # Export markdown transcript
   antigravity-decryptor --format markdown 762506a2-5119-41e2-b4d9-98c944135b68
 
+  # Export markdown transcript with internal/system steps
+  antigravity-decryptor --format markdown --include-internal 762506a2-5119-41e2-b4d9-98c944135b68
+
   # List all conversations
   antigravity-decryptor list
 
@@ -54,10 +59,11 @@ func main() {
 
 func run(args []string) error {
 	var (
-		format   string
-		output   string
-		lsBinary string
-		verbose  bool
+		format          string
+		output          string
+		lsBinary        string
+		verbose         bool
+		includeInternal bool
 	)
 
 	// 简单手写 flag 解析，避免引入额外依赖
@@ -70,6 +76,8 @@ func run(args []string) error {
 			return nil
 		case arg == "--verbose" || arg == "-v":
 			verbose = true
+		case arg == "--include-internal":
+			includeInternal = true
 		case arg == "--format" || arg == "-f":
 			i++
 			if i >= len(args) {
@@ -108,6 +116,9 @@ func run(args []string) error {
 
 	// list 子命令
 	if positional[0] == "list" {
+		if len(positional) > 1 {
+			return fmt.Errorf("too many arguments for list; expected none")
+		}
 		var w io.Writer = os.Stdout
 		if output != "" {
 			f, err := os.Create(output)
@@ -126,11 +137,12 @@ func run(args []string) error {
 	}
 
 	cfg := app.RunConfig{
-		Input:    positional[0],
-		Format:   app.OutputFormat(format),
-		Output:   output,
-		LSBinary: lsBinary,
-		Verbose:  verbose,
+		Input:           positional[0],
+		Format:          app.OutputFormat(format),
+		Output:          output,
+		LSBinary:        lsBinary,
+		Verbose:         verbose,
+		IncludeInternal: includeInternal,
 	}
 
 	return app.Run(cfg)

@@ -78,10 +78,16 @@ cascadeId 即对话 UUID，可通过 `list` 子命令获取，也可在 `~/.gemi
 
 ### markdown
 
-生成可读的 Markdown 对话记录，带角色图标。适合存档和阅读。
+生成可读的 Markdown 对话记录，带角色图标。默认只保留用户可见步骤，适合存档和阅读。
 
 ```bash
 ./bin/antigravity-decryptor --format markdown 762506a2-5119-41e2-b4d9-98c944135b68
+```
+
+如果你确实需要把内部/system-only steps 一起导出，可以显式加上 `--include-internal`：
+
+```bash
+./bin/antigravity-decryptor --format markdown --include-internal 762506a2-5119-41e2-b4d9-98c944135b68
 ```
 
 输出示例：
@@ -169,6 +175,7 @@ export ANTIGRAVITY_LS_PATH=/path/to/language_server_macos_arm
 | 参数 | 缩写 | 说明 | 默认值 |
 |------|------|------|--------|
 | `--format` | `-f` | 输出格式：`raw` / `normalized` / `markdown` | `raw` |
+| `--include-internal` | — | Markdown 模式下包含内部/system-only steps | 关闭 |
 | `--output` | `-o` | 输出文件路径 | stdout |
 | `--ls-binary` | — | Language Server 二进制路径 | 系统默认 |
 | `--verbose` | `-v` | 输出调试日志到 stderr | 关闭 |

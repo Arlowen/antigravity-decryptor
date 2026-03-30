@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
-	"strconv"
 	"strings"
+	"time"
 )
 
 // DiscoveryFile 是 language server 写出的 ls_*.json 的结构。
@@ -17,7 +15,13 @@ type DiscoveryFile struct {
 	HTTPPort  int    `json:"httpPort"`
 	HTTPSPort int    `json:"httpsPort"`
 	PID       int    `json:"pid"`
-	Token     string `json:"token"`
+	CSRFToken string `json:"csrfToken"`
+}
+
+type discoveryRecord struct {
+	File    string
+	ModTime time.Time
+	Data    DiscoveryFile
 }
 
 // daemonDir 返回 ~/.gemini/antigravity/daemon/
@@ -29,59 +33,83 @@ func daemonDir() string {
 // FindHTTPPortFromDiscovery 优先读 ~daemon/ls_*.json，返回 HTTP 端口。
 // 如果没有 json 文件，返回 0, ErrNoDiscovery。
 func FindHTTPPortFromDiscovery() (int, error) {
+	record, err := latestDiscoveryRecord(func(record discoveryRecord) bool {
+		return record.Data.HTTPPort != 0
+	})
+	if err != nil {
+		return 0, err
+	}
+	return record.Data.HTTPPort, nil
+}
+
+func WaitForHTTPPortFromDiscoveryPID(pid int, timeout time.Duration) (int, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		record, err := latestDiscoveryRecord(func(record discoveryRecord) bool {
+			return record.Data.PID == pid && record.Data.HTTPPort != 0
+		})
+		switch {
+		case err == nil:
+			return record.Data.HTTPPort, nil
+		case err != nil && err != ErrNoDiscovery:
+			return 0, err
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	return 0, fmt.Errorf("language server did not publish discovery info for pid %d within %s", pid, timeout)
+}
+
+func latestDiscoveryRecord(match func(record discoveryRecord) bool) (discoveryRecord, error) {
 	dir := daemonDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return 0, fmt.Errorf("cannot read daemon dir %s: %w", dir, err)
+		return discoveryRecord{}, fmt.Errorf("cannot read daemon dir %s: %w", dir, err)
 	}
 
-	// 按文件名排序取最新
-	var jsonFiles []string
+	var latest discoveryRecord
+	found := false
+
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), "ls_") && strings.HasSuffix(e.Name(), ".json") {
-			jsonFiles = append(jsonFiles, filepath.Join(dir, e.Name()))
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "ls_") || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+
+		file := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return discoveryRecord{}, fmt.Errorf("read discovery file %s: %w", file, err)
+		}
+
+		var df DiscoveryFile
+		if err := json.Unmarshal(data, &df); err != nil {
+			return discoveryRecord{}, fmt.Errorf("parse discovery file %s: %w", file, err)
+		}
+
+		record := discoveryRecord{
+			File:    file,
+			ModTime: info.ModTime(),
+			Data:    df,
+		}
+		if !match(record) {
+			continue
+		}
+		if !found || record.ModTime.After(latest.ModTime) {
+			latest = record
+			found = true
 		}
 	}
-	if len(jsonFiles) == 0 {
-		return 0, ErrNoDiscovery
+
+	if !found {
+		return discoveryRecord{}, ErrNoDiscovery
 	}
 
-	sort.Strings(jsonFiles)
-	// 取最后一个（最新）
-	latestFile := jsonFiles[len(jsonFiles)-1]
-
-	data, err := os.ReadFile(latestFile)
-	if err != nil {
-		return 0, fmt.Errorf("read discovery file %s: %w", latestFile, err)
-	}
-
-	var df DiscoveryFile
-	if err := json.Unmarshal(data, &df); err != nil {
-		return 0, fmt.Errorf("parse discovery file %s: %w", latestFile, err)
-	}
-
-	if df.HTTPPort == 0 {
-		return 0, fmt.Errorf("discovery file %s has httpPort=0", latestFile)
-	}
-
-	return df.HTTPPort, nil
-}
-
-// portFromLogLine 从日志行提取 HTTP 端口，例如：
-//   Language server listening on random port at 52094 for HTTP
-var httpPortPattern = regexp.MustCompile(`Language server listening on random port at (\d+) for HTTP\b`)
-
-// ParseHTTPPortFromLog 从日志行（可以是 stdout 流或 log 文件内容）提取 HTTP 端口。
-func ParseHTTPPortFromLog(line string) (int, bool) {
-	m := httpPortPattern.FindStringSubmatch(line)
-	if m == nil {
-		return 0, false
-	}
-	port, err := strconv.Atoi(m[1])
-	if err != nil {
-		return 0, false
-	}
-	return port, true
+	return latest, nil
 }
 
 // ErrNoDiscovery 没有找到 discovery json 文件。

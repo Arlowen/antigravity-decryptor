@@ -58,21 +58,22 @@
 ```
 AcquireServer()
   ├─ 1. 读 ~/.gemini/antigravity/daemon/ls_*.json
+  │     └─ 按修改时间选择最新 discovery
   │     └─ 解析 httpPort，探活（POST /GetAllCascadeTrajectories）
   │     └─ 如活 → 直接复用，返回 Server{port}
   │
   └─ 2. 如果没有存活的服务 → launchServer()
         ├─ 执行 language_server_macos_arm -standalone -persistent_mode
-        ├─ 并发扫描 stdout 日志 + 轮询 discovery 文件
-        ├─ 提取 HTTP 端口
+        ├─ setsid + 重定向 stdout/stderr，保证进程可跨命令存活
+        ├─ 仅等待“当前 pid 写出的” discovery 文件
         └─ 超时 30s 未就绪 → kill 进程，返回错误
 ```
 
 **关键设计决策**：
 
-- **双通道端口发现**：同时监听 stdout 日志行（正则匹配 `Language server listening on random port at \d+ for HTTP`）和轮询 discovery JSON 文件，取先到的。
-- **进程生命周期**：复用已有服务时 `Server.cmd = nil`，不会在 `Close()` 时误杀；仅本次启动的进程才会被清理。
-- **探活机制**：对 `GetAllCascadeTrajectories` 端点发 POST，状态码 < 500 即认为存活。
+- **按 pid 绑定 discovery**：启动新进程后，只接受 `pid == cmd.Process.Pid` 的 discovery 记录，避免误读陈旧端口。
+- **进程生命周期**：standalone server 以持久化模式运行，CLI 退出时不主动关闭，后续命令直接复用。
+- **探活机制**：对 `GetAllCascadeTrajectories` 端点发 POST，要求返回 2xx 才认为存活。
 
 ### 2. API 接口调用
 
